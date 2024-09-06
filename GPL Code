@@ -1,0 +1,55 @@
+#include "udf.h"
+
+/* Define parameters for the Generalized Power-Law model */
+#define MU_INF 0.00345 /* Pa.s */
+#define DELTA_MU 0.25  /* Pa.s */
+#define A 50.0         /* s^-1 */
+#define B 3.0          /* Dimensionless */
+#define N_INF 1.0      /* Dimensionless */
+#define DELTA_N 0.45   /* Dimensionless */
+#define C 50.0         /* s^-1 */
+#define D 445.0        /* Dimensionless */
+#define MIN_SHEAR_RATE 1e-10 /* Small but non-zero value to avoid issues */
+
+real calculate_K(real shear_rate) {
+    if (shear_rate < MIN_SHEAR_RATE) {
+        shear_rate = MIN_SHEAR_RATE; /* Avoid division by zero */
+    }
+    return MU_INF + DELTA_MU * exp(- (1 + shear_rate / A) * exp(- B / shear_rate));
+}
+
+real calculate_n(real shear_rate) {
+    if (shear_rate < MIN_SHEAR_RATE) {
+        shear_rate = MIN_SHEAR_RATE; /* Avoid division by zero */
+    }
+    return N_INF - DELTA_N * exp(- (1 + shear_rate / C) * exp(- D / shear_rate));
+}
+
+DEFINE_PROPERTY(viscosity, cell, thread)
+{
+    real shear_rate;
+    real K, n;
+    real viscosity;
+
+    /* Get the magnitude of the shear rate in the cell */
+    shear_rate = C_STRAIN_RATE_MAG(cell, thread);
+
+    /* Ensure the shear rate is not too small to prevent overflow or underflow */
+    if (shear_rate < MIN_SHEAR_RATE) {
+        shear_rate = MIN_SHEAR_RATE; /* Small but non-zero to avoid calculation issues */
+    }
+
+    /* Calculate K and n based on the shear rate */
+    K = calculate_K(shear_rate);
+    n = calculate_n(shear_rate);
+
+    /* Calculate viscosity using the Generalized Power-Law model */
+    viscosity = K * pow(shear_rate, n - 1);
+
+    /* Ensure viscosity is within a realistic range */
+    if (viscosity < 1e-10 || viscosity > 1e3) {
+        viscosity = MU_INF; /* Set a reasonable default value to avoid unrealistic viscosity */
+    }
+
+    return viscosity;
+}
